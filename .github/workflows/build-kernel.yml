@@ -48,6 +48,7 @@ jobs:
           git clone --depth 1 https://github.com/osm0sis/AnyKernel3
           cd AnyKernel3
           rm -f *placeholder
+          rm -rf .git .github   # 干净打包
           cp ../out/arch/arm64/boot/Image.gz .
           # 配置 anykernel.sh：设备 marble / marblein（Redmi Note 12 Turbo / POCO F5）
           sed -i "s|kernel.string=.*|kernel.string=GlowR Kernel for Redmi Note 12 Turbo (marble) / POCO F5 (marblein)|" anykernel.sh
@@ -60,7 +61,7 @@ jobs:
           sed -i "s|IS_SLOT_DEVICE=0|IS_SLOT_DEVICE=1|" anykernel.sh
           # GKI 内核无 dtb 源，AK2 会自动沿用原 boot 分区设备树
           cd ..
-          cd AnyKernel3 && zip -r9 ../GlowR-kernel-marble.zip . -x .git README.md
+          cd AnyKernel3 && zip -r9 ../GlowR-kernel-marble.zip .
 
       - name: Upload kernel zip
         uses: actions/upload-artifact@v4
