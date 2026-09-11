@@ -119,4 +119,6 @@ jobs:
             out/vmlinux.symvers
             out/.config
           retention-days: 30
+          # out/.config 是点文件，默认不会被上传，这里显式打开
+          include-hidden-files: true
           if-no-files-found: warn
