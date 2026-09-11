@@ -16,7 +16,7 @@
   正确做法是让内核导出的符号 CRC 与原厂内核完全一致，然后用本脚本证明它。
 
 数据格式:
-  Module.symvers 每行:  CRC(hex) \t symbol \t module \t export
+  符号表每行:  CRC(hex) \t symbol \t module \t export
       这是本次构建「内核导出给模块的符号 + 其 CRC」，和模块加载时比对的是同一份数据。
       也兼容 2 列格式 (CRC(hex) \t symbol)，便于拿原厂内核导出的符号表做自检。
   kmi/abi_reference.tsv 每行: CRC \t symbol \t vmlinux|MODULE \t REQUIRED|kernel|MODULE
@@ -99,11 +99,19 @@ def main():
     args = ap.parse_args()
 
     for p in (args.symvers, args.reference):
+        msg = None
         if not os.path.exists(p):
-            sys.stderr.write("ERROR: 找不到文件 %s\n" % p)
-            return 2
-        if os.path.getsize(p) == 0:
-            sys.stderr.write("ERROR: 文件为空 %s（多半是 make modules 没跑成功）\n" % p)
+            msg = "找不到文件 %s" % p
+        elif os.path.getsize(p) == 0:
+            msg = "文件为空 %s（构建没产出符号表？）" % p
+        if msg:
+            text = ("================ KMI / ABI 对账报告 ================\n"
+                    "ERROR: %s\n"
+                    "===================================================\n" % msg)
+            sys.stderr.write(text)
+            if args.report:
+                with open(args.report, "w", encoding="utf-8") as f:
+                    f.write(text)
             return 2
 
     built = parse_symvers(args.symvers)

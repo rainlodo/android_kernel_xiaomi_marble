@@ -13,7 +13,7 @@
 #           导致大量符号 CRC 不一致：模块要么被内核拒绝加载，要么（原版 Melt 的
 #           "but ignore / return 1" 补丁）强行加载后随机踩内存 -> 死机重启。
 #
-# 相对原厂只改 5 处，其余 6700+ 行逐行一致：
+# 相对原厂只改 6 处，其余 6700+ 行逐行一致：
 #   1) CONFIG_TRIM_UNUSED_KSYMS: y -> n
 #      原厂裁剪白名单是 Google 构建机上的路径 /buildbot/src/android/common-android12-5.10-2022-09/...，
 #      本机不存在。它只决定“导出哪些符号”，不参与任何符号的 CRC 计算 -> 对 ABI 零影响。
@@ -27,6 +27,13 @@
 #      对 com.google.android.gms 进程伪造 uname 版本串（用于过 Play Integrity）。
 #      实现只是 kernel/sys.c 里 copy_to_user 一个字符串，不改结构体 -> 对 ABI 零影响。
 #      不需要就把下面 3 行删掉。
+#
+#   6) 新增 # CONFIG_STACKPROTECTOR_PER_TASK is not set —— 这一条是 clang 版本陷阱，很关键：
+#      原厂用 clang 12.0.5，它不支持 -mstack-protector-guard=sysreg，于是 CC_HAVE_STACKPROTECTOR_SYSREG=n，
+#      这个选项在原厂配置里根本不可见（等价于关）。CI 用 clang 14，支持该 flag -> 选项变可见且默认 y，
+#      内核改用「每任务金丝雀」，全局 __stack_chk_guard 被条件编译掉、不再导出；
+#      而 ROM 里每个模块都引用 __stack_chk_guard -> 会 Unknown symbol 全部加载失败。
+#      所以必须显式关掉，回到原厂那种「用全局 __stack_chk_guard 的经典金丝雀」。
 #
 # 刷机前的判定标准（CI 会自动跑 tools/kmi/check_kmi.py）：
 #   REQUIRED 2268 个符号必须 0 不一致、0 缺失，且 module_layout 必须 = 0x7c24b32d
@@ -750,6 +757,7 @@ CONFIG_HAVE_ARCH_STACKLEAK=y
 CONFIG_HAVE_STACKPROTECTOR=y
 CONFIG_STACKPROTECTOR=y
 CONFIG_STACKPROTECTOR_STRONG=y
+# CONFIG_STACKPROTECTOR_PER_TASK is not set
 CONFIG_ARCH_SUPPORTS_SHADOW_CALL_STACK=y
 CONFIG_SHADOW_CALL_STACK=y
 CONFIG_LTO=y

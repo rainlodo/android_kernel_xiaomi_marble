@@ -54,19 +54,16 @@ jobs:
             echo "::endgroup::"
           fi
           echo "=== 本次生效的关键配置 ==="
-          grep -E '^#? ?CONFIG_(LOCALVERSION|MODVERSIONS|MODULES|LTO_CLANG|CFI_CLANG|KASAN|SHADOW_CALL_STACK|TRIM_UNUSED_KSYMS|USER_NS|PID_NS|IPC_NS|SYSVIPC|POSIX_MQUEUE|CGROUP_DEVICE|TMPFS_XATTR|OVERLAY_FS)' out/.config || true
+          grep -E '^#? ?CONFIG_(LOCALVERSION|MODVERSIONS|MODULES|LTO_CLANG|CFI_CLANG|KASAN|SHADOW_CALL_STACK|STACKPROTECTOR|TRIM_UNUSED_KSYMS|USER_NS|PID_NS|IPC_NS|SYSVIPC|POSIX_MQUEUE|CGROUP_DEVICE|TMPFS_XATTR|OVERLAY_FS)' out/.config || true
 
       - name: Build kernel Image.gz
         run: make ARCH=arm64 O=out LLVM=1 LLVM_IAS=1 -j$(nproc) Image.gz
 
-      - name: Build modules（只为产出 Module.symvers 做 ABI 对账，不参与刷机包）
-        continue-on-error: true
-        run: make ARCH=arm64 O=out LLVM=1 LLVM_IAS=1 -j$(nproc) -k modules
-
-      - name: Verify build products
+      - name: Verify build products (vmlinux.symvers 由 link-vmlinux.sh 自动产出)
         run: |
-          ls -lh out/arch/arm64/boot/Image.gz out/Module.symvers || true
+          ls -lh out/arch/arm64/boot/Image.gz out/vmlinux.symvers out/.config
           file out/arch/arm64/boot/Image.gz
+          echo "符号表行数: $(wc -l < out/vmlinux.symvers)"
           echo "kernelrelease: $(make ARCH=arm64 O=out LLVM=1 LLVM_IAS=1 -s kernelrelease 2>/dev/null || echo '(未知)')"
 
       - name: Package with AnyKernel3
@@ -93,18 +90,22 @@ jobs:
         # stock-abi 必须通过（不通过=红）；docker 组是实验组，只作数据参考
         continue-on-error: ${{ matrix.variant == 'docker' }}
         run: |
+          set +e
           python3 kmi/check_kmi.py \
-            --symvers out/Module.symvers \
+            --symvers out/vmlinux.symvers \
             --reference kmi/abi_reference.tsv \
             --label "${{ matrix.variant }} (LTO_CLANG_THIN, clang-r450784d)" \
-            --report kmi_report.txt
+            --report kmi_report.txt | tee kmi_console.txt
+          rc=${PIPESTATUS[0]}
+          set -e
           {
             echo "## KMI 对账 — ${{ matrix.variant }}"
             echo ""
             echo '```'
-            head -40 kmi_report.txt
+            head -40 kmi_report.txt 2>/dev/null || echo "(没有报告)"
             echo '```'
           } >> $GITHUB_STEP_SUMMARY
+          exit $rc
 
       - name: Upload kernel zip + ABI 证据
         if: always()
@@ -112,9 +113,10 @@ jobs:
         with:
           name: GlowR-kernel-marble-${{ matrix.variant }}
           path: |
-            GlowR-kernel-marble-${{ matrix.variant }}.zip
+            GlowR-kernel-marble-*.zip
             kmi_report.txt
-            out/Module.symvers
+            kmi_console.txt
+            out/vmlinux.symvers
             out/.config
           retention-days: 30
           if-no-files-found: warn
