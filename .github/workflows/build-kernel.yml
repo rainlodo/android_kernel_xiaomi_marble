@@ -331,8 +331,11 @@ jobs:
             for f in kmi_report gki_report; do
               [ -f "$d/$f.txt" ] && cp "$d/$f.txt" "pub/$f-$v.txt" || true
             done
-            [ -f "$d/vmlinux.symvers" ] && cp "$d/vmlinux.symvers" "pub/vmlinux.symvers-$v" || true
-            [ -f "$d/.config" ] && cp "$d/.config" "pub/kernel-config-$v.txt" || true
+            # 注意：上传产物时 out/ 的目录层级会被保留，所以用 find 兜住路径差异
+            VS="$(find "$d" -name vmlinux.symvers -print -quit || true)"
+            CF="$(find "$d" -name .config -print -quit || true)"
+            if [ -n "$VS" ]; then cp "$VS" "pub/vmlinux.symvers-$v"; fi
+            if [ -n "$CF" ]; then cp "$CF" "pub/kernel-config-$v.txt"; fi
             KREL="$(sed -n 's/^kernelrelease=//p' "$d/build-info.txt" 2>/dev/null || true)"
             if [ -n "${KREL:-}" ]; then printf '%s\n' "$KREL" > "pub/kernelrelease-$v.txt"; fi
           done
