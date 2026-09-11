@@ -1128,3 +1128,5 @@ CONFIG_OVERLAY_FS_XINO_AUTO=y
 CONFIG_OVERLAY_FS_USERXATTR=y
 # ===== GlowR v1.0.5: 提供 mqueue 文件系统（runc 挂载 /dev/mqueue 必需）=====
 CONFIG_POSIX_MQUEUE=y
+# ===== GlowR v1.0.6: 显式关闭 IPC_NS（v1.0.5 解锁崩溃嫌疑），仅保留 POSIX_MQUEUE(mqueue fs) =====
+# CONFIG_IPC_NS is not set
