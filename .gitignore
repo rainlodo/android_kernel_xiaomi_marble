@@ -167,3 +167,6 @@ sphinx_*/
 # Custom
 /build.sh
 Documentation/devicetree/bindings
+
+# GlowR: 让 .github/workflows 可以被正常 git add
+!.github/
