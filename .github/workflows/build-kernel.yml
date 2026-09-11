@@ -1,5 +1,6 @@
 name: Build GlowR Kernel
 
+# 只在打 tag（GlowR-*）时构建，与原版一致
 on:
   push:
     tags:
@@ -8,6 +9,16 @@ on:
 jobs:
   build-kernel:
     runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - variant: stock-abi
+            # 主线：defconfig 与原厂 ROM 内核逐行对齐，目标是 ABI 100% 一致
+          - variant: docker
+            # 对照实验：在原厂配置基础上额外打开容器所需命名空间，
+            #           用来量化“为了 docker 到底牺牲多少 ABI 一致性”
+    name: build (${{ matrix.variant }})
 
     steps:
       - name: Checkout kernel source
@@ -29,18 +40,34 @@ jobs:
           echo "$PWD/toolchain/clang/bin" >> $GITHUB_PATH
           clang --version | head -1
 
-      - name: Configure kernel (marble_defconfig)
+      - name: Configure kernel (marble_gki_defconfig = 原厂 ABI 基线)
         run: |
-          make ARCH=arm64 O=out LLVM=1 LLVM_IAS=1 marble_defconfig
+          make ARCH=arm64 O=out LLVM=1 LLVM_IAS=1 marble_gki_defconfig
+          if [ "${{ matrix.variant }}" = "docker" ]; then
+            echo "::group::额外打开容器所需选项（实验组）"
+            scripts/config --file out/.config \
+              -e SYSVIPC -e POSIX_MQUEUE -e IPC_NS \
+              -e USER_NS -e PID_NS \
+              -e CGROUP_DEVICE -e TMPFS_XATTR \
+              -e OVERLAY_FS_INDEX -e OVERLAY_FS_METACOPY -e OVERLAY_FS_XINO_AUTO
+            make ARCH=arm64 O=out LLVM=1 LLVM_IAS=1 olddefconfig
+            echo "::endgroup::"
+          fi
+          echo "=== 本次生效的关键配置 ==="
+          grep -E '^#? ?CONFIG_(LOCALVERSION|MODVERSIONS|MODULES|LTO_CLANG|CFI_CLANG|KASAN|SHADOW_CALL_STACK|TRIM_UNUSED_KSYMS|USER_NS|PID_NS|IPC_NS|SYSVIPC|POSIX_MQUEUE|CGROUP_DEVICE|TMPFS_XATTR|OVERLAY_FS)' out/.config || true
 
       - name: Build kernel Image.gz
-        run: |
-          make ARCH=arm64 O=out LLVM=1 LLVM_IAS=1 -j$(nproc) Image.gz
+        run: make ARCH=arm64 O=out LLVM=1 LLVM_IAS=1 -j$(nproc) Image.gz
+
+      - name: Build modules（只为产出 Module.symvers 做 ABI 对账，不参与刷机包）
+        continue-on-error: true
+        run: make ARCH=arm64 O=out LLVM=1 LLVM_IAS=1 -j$(nproc) -k modules
 
       - name: Verify build products
         run: |
-          ls -lh out/arch/arm64/boot/Image.gz
+          ls -lh out/arch/arm64/boot/Image.gz out/Module.symvers || true
           file out/arch/arm64/boot/Image.gz
+          echo "kernelrelease: $(make ARCH=arm64 O=out LLVM=1 LLVM_IAS=1 -s kernelrelease 2>/dev/null || echo '(未知)')"
 
       - name: Package with AnyKernel3
         run: |
@@ -60,11 +87,34 @@ jobs:
           sed -i "s|IS_SLOT_DEVICE=0|IS_SLOT_DEVICE=1|" anykernel.sh
           # GKI 内核无 dtb 源，AK2 会自动沿用原 boot 分区设备树
           cd ..
-          cd AnyKernel3 && zip -r9 ../GlowR-kernel-marble.zip .
+          cd AnyKernel3 && zip -r9 ../GlowR-kernel-marble-${{ matrix.variant }}.zip .
 
-      - name: Upload kernel zip
+      - name: KMI / ABI 对账（决定这个包能不能刷）
+        # stock-abi 必须通过（不通过=红）；docker 组是实验组，只作数据参考
+        continue-on-error: ${{ matrix.variant == 'docker' }}
+        run: |
+          python3 kmi/check_kmi.py \
+            --symvers out/Module.symvers \
+            --reference kmi/abi_reference.tsv \
+            --label "${{ matrix.variant }} (LTO_CLANG_THIN, clang-r450784d)" \
+            --report kmi_report.txt
+          {
+            echo "## KMI 对账 — ${{ matrix.variant }}"
+            echo ""
+            echo '```'
+            head -40 kmi_report.txt
+            echo '```'
+          } >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload kernel zip + ABI 证据
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: GlowR-kernel-marble
-          path: GlowR-kernel-marble.zip
+          name: GlowR-kernel-marble-${{ matrix.variant }}
+          path: |
+            GlowR-kernel-marble-${{ matrix.variant }}.zip
+            kmi_report.txt
+            out/Module.symvers
+            out/.config
           retention-days: 30
+          if-no-files-found: warn
