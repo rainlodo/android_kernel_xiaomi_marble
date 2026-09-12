@@ -73,18 +73,9 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
   build-kernel:
-    name: build (${{ matrix.variant }})
+    name: build (docker)
     needs: prepare
     runs-on: ubuntu-22.04
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - variant: stock-abi
-            # 主线：defconfig 与原厂 ROM 内核逐行对齐，目标是 ABI 100% 一致
-          - variant: docker
-            # 对照实验：在原厂配置基础上额外打开容器所需命名空间，
-            #           用来量化“为了 docker 到底牺牲多少 ABI 一致性”
     steps:
       - name: Checkout kernel source
         uses: actions/checkout@v4
@@ -105,26 +96,30 @@ jobs:
           echo "$PWD/toolchain/clang/bin" >> $GITHUB_PATH
           clang --version | head -1
 
-      - name: Configure kernel (marble_gki_defconfig = 原厂 ABI 基线)
+      - name: Configure kernel (marble_gki_defconfig = 唯一配置来源，Docker 选项已内建)
         run: |
           make ARCH=arm64 O=out LLVM=1 LLVM_IAS=1 marble_gki_defconfig
-          if [ "${{ matrix.variant }}" = "docker" ]; then
-            echo "::group::额外打开容器所需选项（实验组）"
-            scripts/config --file out/.config \
-              -e SYSVIPC -e POSIX_MQUEUE -e IPC_NS \
-              -e USER_NS -e PID_NS \
-              -e CGROUP_DEVICE -e TMPFS_XATTR \
-              -e OVERLAY_FS_INDEX -e OVERLAY_FS_METACOPY -e OVERLAY_FS_XINO_AUTO
-            make ARCH=arm64 O=out LLVM=1 LLVM_IAS=1 olddefconfig
-            echo "::endgroup::"
-          fi
+          make ARCH=arm64 O=out LLVM=1 LLVM_IAS=1 olddefconfig
 
       - name: 注入 GlowR 版本串（版本号 + 编译时间）
         run: scripts/glowr-version.sh out "${{ needs.prepare.outputs.version }}" "${{ needs.prepare.outputs.stamp }}"
 
-      - name: 打印本次生效的关键配置
+      - name: 检查本次生效的关键配置（Docker 必需项断言）
         run: |
-          grep -E '^#? ?CONFIG_(LOCALVERSION|MODVERSIONS|MODULES|LTO_CLANG|CFI_CLANG|KASAN|SHADOW_CALL_STACK|STACKPROTECTOR|TRIM_UNUSED_KSYMS|USER_NS|PID_NS|IPC_NS|SYSVIPC|POSIX_MQUEUE|CGROUP_DEVICE|TMPFS_XATTR|OVERLAY_FS)' out/.config || true
+          grep -E '^#? ?CONFIG_(LOCALVERSION|MODVERSIONS|MODULES|LTO_CLANG|CFI_CLANG|KASAN|SHADOW_CALL_STACK|STACKPROTECTOR|TRIM_UNUSED_KSYMS|NAMESPACES|USER_NS|PID_NS|IPC_NS|SYSVIPC|POSIX_MQUEUE|CGROUP_DEVICE|CGROUP_BPF|KEYS|SECCOMP|TMPFS_XATTR|OVERLAY_FS)' out/.config || true
+          # defconfig 是唯一配置来源：这里断言 Docker 必需项没有被 Kconfig 依赖静默回滚
+          fail=0
+          for o in POSIX_MQUEUE USER_NS CGROUP_DEVICE CGROUP_BPF SECCOMP KEYS \
+                   OVERLAY_FS_INDEX OVERLAY_FS_METACOPY OVERLAY_FS_XINO_AUTO \
+                   NAMESPACES NET_NS UTS_NS; do
+            grep -q "^CONFIG_$o=y" out/.config || { echo "::error::CONFIG_$o 未生效"; fail=1; }
+          done
+          # 这三个是 v1.0.1 bootloop / v1.0.5 解锁卡死的嫌疑项，必须保持关闭
+          for o in PID_NS IPC_NS SYSVIPC TMPFS_XATTR; do
+            grep -q "^# CONFIG_$o is not set" out/.config || { echo "::error::CONFIG_$o 应为关闭"; fail=1; }
+          done
+          [ "$fail" = 0 ] && echo "Docker 关键配置断言通过"
+          exit $fail
 
       - name: Build kernel Image.gz
         run: make ARCH=arm64 O=out LLVM=1 LLVM_IAS=1 -j$(nproc) Image.gz
@@ -139,14 +134,14 @@ jobs:
         run: |
           KREL="$(make ARCH=arm64 O=out LLVM=1 LLVM_IAS=1 -s kernelrelease 2>/dev/null || echo '(未知)')"
           {
-            echo "variant=${{ matrix.variant }}"
+            echo "variant=docker"
             echo "version=${{ needs.prepare.outputs.version }}"
             echo "kernelrelease=$KREL"
             echo "build_time_cst=${{ needs.prepare.outputs.stamp }}"
             echo "commit=${{ github.sha }}"
           } > build-info.txt
           cat build-info.txt
-          echo "- \`${{ matrix.variant }}\` kernelrelease: \`$KREL\`" >> $GITHUB_STEP_SUMMARY
+          echo "- \`docker\` kernelrelease: \`$KREL\`" >> $GITHUB_STEP_SUMMARY
 
       - name: Package with AnyKernel3
         run: |
@@ -166,23 +161,23 @@ jobs:
           sed -i "s|IS_SLOT_DEVICE=0|IS_SLOT_DEVICE=1|" anykernel.sh
           # GKI 内核无 dtb 源，AK2 会自动沿用原 boot 分区设备树
           cd ..
-          cd AnyKernel3 && zip -r9 ../GlowR-kernel-marble-${{ matrix.variant }}-${{ needs.prepare.outputs.version }}.zip .
+          cd AnyKernel3 && zip -r9 ../GlowR-kernel-marble-docker-${{ needs.prepare.outputs.version }}.zip .
 
       - name: KMI 对账（原厂 ROM 模块 ABI）
-        # stock-abi 必须通过（不通过=红）；docker 组是实验组，只作数据参考
-        continue-on-error: ${{ matrix.variant == 'docker' }}
+        # 已放行 CRC 不匹配模块，ABI 对账只作数据参考、不再当门禁
+        continue-on-error: true
         run: |
           set +e
           python3 kmi/check_kmi.py \
             --symvers out/vmlinux.symvers \
             --reference kmi/abi_reference.tsv \
-            --label "${{ matrix.variant }} ${{ needs.prepare.outputs.version }} (LTO_CLANG_THIN, clang-r450784d)" \
+            --label "docker ${{ needs.prepare.outputs.version }} (LTO_CLANG_THIN, clang-r450784d)" \
             --report kmi_report.txt | tee kmi_console.txt
           rc=${PIPESTATUS[0]}
           set -e
           {
             echo ""
-            echo "## KMI 对账 — ${{ matrix.variant }}"
+            echo "## KMI 对账 — docker"
             echo ""
             echo '```'
             head -40 kmi_report.txt 2>/dev/null || echo "(没有报告)"
@@ -191,19 +186,19 @@ jobs:
           exit $rc
 
       - name: GKI ABI 基线校验（Google GKI android/abi_gki_aarch64.xml）
-        # 同样：stock-abi 必须通过；docker 组按预期会红，仅作数据
-        continue-on-error: ${{ matrix.variant == 'docker' }}
+        # 同上：仅作数据参考
+        continue-on-error: true
         run: |
           set +e
           python3 kmi/check_gki.py \
             android/abi_gki_aarch64.xml \
             out/vmlinux.symvers \
-            "${{ matrix.variant }} ${{ needs.prepare.outputs.version }}" 2>&1 | tee gki_report.txt
+            "docker ${{ needs.prepare.outputs.version }}" 2>&1 | tee gki_report.txt
           rc=${PIPESTATUS[0]}
           set -e
           {
             echo ""
-            echo "## GKI ABI 基线校验 — ${{ matrix.variant }}"
+            echo "## GKI ABI 基线校验 — docker"
             echo ""
             echo '```'
             head -30 gki_report.txt
@@ -215,7 +210,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: GlowR-kernel-marble-${{ matrix.variant }}
+          name: GlowR-kernel-marble-docker
           path: |
             GlowR-kernel-marble-*.zip
             kmi_report.txt
@@ -259,7 +254,7 @@ jobs:
           EXTRA: ${{ github.event.inputs.notes }}
         run: |
           set -eu
-          INFO=artifacts/GlowR-kernel-marble-stock-abi/build-info.txt
+          INFO=artifacts/GlowR-kernel-marble-docker/build-info.txt
           KREL="$(sed -n 's/^kernelrelease=//p' "$INFO" 2>/dev/null || true)"
           [ -n "${KREL:-}" ] || KREL="(未记录)"
           PRETTY_STAMP="$(echo "$STAMP" | sed -E 's/^([0-9]{4})([0-9]{2})([0-9]{2})-([0-9]{2})([0-9]{2})$/\1-\2-\3 \4:\5/')"
@@ -300,15 +295,14 @@ jobs:
             echo ""
             echo "## 校验结果（构建时自动执行）"
             echo ""
-            echo "- 原厂 ROM 模块 ABI 对账（2268 个必需符号 + module_layout）：\`kmi_report-stock-abi.txt\`"
-            echo "- Google GKI ABI 基线（\`android/abi_gki_aarch64.xml\`）：\`gki_report-stock-abi.txt\`"
+            echo "- 原厂 ROM 模块 ABI 对账（2268 个必需符号 + module_layout）：\`kmi_report-docker.txt\`"
+            echo "- Google GKI ABI 基线（\`android/abi_gki_aarch64.xml\`）：\`gki_report-docker.txt\`"
             echo ""
             echo "## 文件说明"
             echo ""
             echo "| 文件 | 说明 |"
             echo "| --- | --- |"
-            echo "| \`GlowR-kernel-marble-stock-abi-$VERSION.zip\` | **推荐日常使用**：与原厂 ROM 的 vendor 模块 ABI 完全对齐 |"
-            echo "| \`GlowR-kernel-marble-docker-$VERSION.zip\` | 实验组：额外打开容器所需命名空间，ABI 不一致，仅供测试 |"
+            echo "| \`GlowR-kernel-marble-docker-$VERSION.zip\` | 唯一产物：额外打开容器所需命名空间；ABI 与原厂不完全一致，靠内核放行 CRC 不匹配模块加载 ROM 的 vendor 模块 |"
             echo "| \`*.symvers\` / \`*.config\` / \`*report*.txt\` / \`kernelrelease-*.txt\` | ABI 对账证据（导出符号表 / 内核配置 / 校验报告 / 版本串） |"
             echo ""
             echo "> 适用机型：Redmi Note 12 Turbo / POCO F5（marble / marblein）。刷入前请自行备份 boot 分区。"
@@ -324,7 +318,7 @@ jobs:
         run: |
           set -eu
           rm -rf pub && mkdir -p pub
-          for v in stock-abi docker; do
+          for v in docker; do
             d="artifacts/GlowR-kernel-marble-$v"
             [ -d "$d" ] || continue
             cp "$d"/*.zip pub/ 2>/dev/null || true

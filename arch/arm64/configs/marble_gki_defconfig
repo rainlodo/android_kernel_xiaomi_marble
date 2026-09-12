@@ -13,7 +13,7 @@
 #           导致大量符号 CRC 不一致：模块要么被内核拒绝加载，要么（原版 Melt 的
 #           "but ignore / return 1" 补丁）强行加载后随机踩内存 -> 死机重启。
 #
-# 相对原厂只改 6 处，其余 6700+ 行逐行一致：
+# 相对原厂只改 6 处（这 6 处都不参与任何符号的 CRC 计算），其余 6700+ 行逐行一致：
 #   1) CONFIG_TRIM_UNUSED_KSYMS: y -> n
 #      原厂裁剪白名单是 Google 构建机上的路径 /buildbot/src/android/common-android12-5.10-2022-09/...，
 #      本机不存在。它只决定“导出哪些符号”，不参与任何符号的 CRC 计算 -> 对 ABI 零影响。
@@ -38,8 +38,15 @@
 #      而 ROM 里每个模块都引用 __stack_chk_guard -> 会 Unknown symbol 全部加载失败。
 #      所以必须显式关掉，回到原厂那种「用全局 __stack_chk_guard 的经典金丝雀」。
 #
-# 刷机前的判定标准（CI 会自动跑 tools/kmi/check_kmi.py）：
-#   REQUIRED 2268 个符号必须 0 不一致、0 缺失，且 module_layout 必须 = 0x7c24b32d
+# 刷机前的判定标准（2026-09-13 起变更）：
+#   本分支（docker-support-noABI）已放弃"ABI 100% 对齐"这个目标 —— 见文件末尾的
+#   Docker 支持块，那些选项必然改掉一批导出符号的 CRC。kernel/module.c 的
+#   check_version()/bad_version 分支已恢复 return 1，内核放行 CRC 不匹配的模块，
+#   ROM 里 /vendor_dlkm 的 vendor 模块照常加载。
+#   CI 仍会跑 tools/kmi/check_kmi.py 与 check_gki.py（2268 个必需符号 + module_layout
+#   == 0x7c24b32d），但结论只作数据参考、不再当门禁。
+#   真正的刷机判据是 dmesg 里 "disagrees about version of symbol" 的条数：
+#   条数越多 = vendor 模块与内核的结构体布局漂移越大 = 越可能踩内存（参见 0912 复盘）。
 
 CONFIG_UNAME_OVERRIDE=y
 CONFIG_UNAME_OVERRIDE_TARGET="com.google.android.gms"
@@ -6758,3 +6765,35 @@ CONFIG_CC_HAS_SANCOV_TRACE_PC=y
 # CONFIG_MEMTEST is not set
 # end of Kernel Testing and Coverage
 # end of Kernel hacking
+
+# ============================================================================
+# GlowR Docker 支持块 —— 必须留在文件末尾！
+#   Kconfig 以"最后一次出现"为准，靠这里覆盖前面那些 "# CONFIG_xxx is not set"。
+#   依据：Docker 官方 contrib/check-config.sh + 本项目 v1.0.1~v1.0.6 的实测迭代
+#        （详见《Android-Docker-内核改造全记录.md》）。
+#   代价：这些选项会改掉一批导出符号的 CRC -> 本分支走 NoABI 路线（module.c 放行）。
+# ============================================================================
+# 隔离 / 安全类（v1.0.2 保留的 5 项；KEYS / SECCOMP 原厂本来就是 y）
+CONFIG_CGROUP_DEVICE=y
+CONFIG_KEYS=y
+CONFIG_SECCOMP=y
+CONFIG_USER_NS=y
+# overlayfs 子选项（docker 默认挂载带 index=off / metacopy 参数，缺了会 EINVAL）
+# 注意：本机因 fscrypt 与 overlayfs 冲突，实际用 vfs 存储驱动，这几项保留无害
+CONFIG_OVERLAY_FS_INDEX=y
+CONFIG_OVERLAY_FS_METACOPY=y
+CONFIG_OVERLAY_FS_XINO_AUTO=y
+# （原来的 CONFIG_OVERLAY_FS_USERXATTR 已删：5.10 这棵树的 Kconfig 里没有这个选项，
+#   写了也会被静默忽略，留着只会误导。）
+# mqueue 文件系统：runc 创建容器时必挂 /dev/mqueue（v1.0.5 唯一必须的内核改动）
+CONFIG_POSIX_MQUEUE=y
+# ---------------------------------------------------------------------------
+# 以下三项保持关闭，不要开：
+#   PID_NS   -> 运行时用 --pid=host 绕过（GKI 原厂就是关的）
+#   IPC_NS   -> 运行时用 --ipc=host 绕过（v1.0.5 解锁卡死的嫌疑项）
+#   SYSVIPC  -> Android 生态禁用，v1.0.1/v1.0.4 bootloop 的头号嫌疑
+# 未开 TMPFS_XATTR：vfs 驱动 + host 网络用不到（tmpfs 上的 SELinux label 由 mount
+#   context= 提供），而每多一项 CONFIG 就多一份 ABI 偏移；将来要在 tmpfs 上做
+#   overlayfs upper / 写 xattr 时再单开并验证。
+# ---------------------------------------------------------------------------
+# CONFIG_IPC_NS is not set
