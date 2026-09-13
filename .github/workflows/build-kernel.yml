@@ -206,13 +206,23 @@ jobs:
           } >> $GITHUB_STEP_SUMMARY
           exit $rc
 
-      - name: Upload kernel zip + ABI 证据
+      # 产物分两个 artifact 上传：刷机包一个、对账证据一个。
+      # 这样在 Actions 页面下载时不会得到一个把 20MB 刷机包和证据混在一起的大压缩包。
+      - name: Upload 刷机包（AnyKernel3 zip）
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: GlowR-kernel-marble-docker
+          path: GlowR-kernel-marble-*.zip
+          retention-days: 30
+          if-no-files-found: warn
+
+      - name: Upload ABI 对账证据
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: GlowR-abi-evidence-docker
           path: |
-            GlowR-kernel-marble-*.zip
             kmi_report.txt
             kmi_console.txt
             gki_report.txt
@@ -237,6 +247,10 @@ jobs:
     runs-on: ubuntu-22.04
     permissions:
       contents: write
+    # 注意：Release 任务刻意不 clone 内核仓库（仓库历史太大，全量 checkout 要十几分钟），
+    # gh 在没有 .git 的工作目录里定位不到仓库，所以必须显式给它 GH_REPO。
+    env:
+      GH_REPO: ${{ github.repository }}
     steps:
       # 注意：这里刻意不 clone 仓库。kernel 仓库历史极大（全量 checkout 要十分钟以上），
       # 改动说明改成直接问 GitHub API，几秒钟就能拿到。
@@ -254,7 +268,7 @@ jobs:
           EXTRA: ${{ github.event.inputs.notes }}
         run: |
           set -eu
-          INFO=artifacts/GlowR-kernel-marble-docker/build-info.txt
+          INFO=artifacts/GlowR-abi-evidence-docker/build-info.txt
           KREL="$(sed -n 's/^kernelrelease=//p' "$INFO" 2>/dev/null || true)"
           [ -n "${KREL:-}" ] || KREL="(未记录)"
           PRETTY_STAMP="$(echo "$STAMP" | sed -E 's/^([0-9]{4})([0-9]{2})([0-9]{2})-([0-9]{2})([0-9]{2})$/\1-\2-\3 \4:\5/')"
@@ -318,21 +332,20 @@ jobs:
         run: |
           set -eu
           rm -rf pub && mkdir -p pub
-          for v in docker; do
-            d="artifacts/GlowR-kernel-marble-$v"
-            [ -d "$d" ] || continue
-            cp "$d"/*.zip pub/ 2>/dev/null || true
-            for f in kmi_report gki_report; do
-              [ -f "$d/$f.txt" ] && cp "$d/$f.txt" "pub/$f-$v.txt" || true
-            done
-            # 注意：上传产物时 out/ 的目录层级会被保留，所以用 find 兜住路径差异
-            VS="$(find "$d" -name vmlinux.symvers -print -quit || true)"
-            CF="$(find "$d" -name .config -print -quit || true)"
-            if [ -n "$VS" ]; then cp "$VS" "pub/vmlinux.symvers-$v"; fi
-            if [ -n "$CF" ]; then cp "$CF" "pub/kernel-config-$v.txt"; fi
-            KREL="$(sed -n 's/^kernelrelease=//p' "$d/build-info.txt" 2>/dev/null || true)"
-            if [ -n "${KREL:-}" ]; then printf '%s\n' "$KREL" > "pub/kernelrelease-$v.txt"; fi
+          # 刷机包在 kernel artifact 里，对账证据在 evidence artifact 里（两个 artifact 分开）
+          K="artifacts/GlowR-kernel-marble-docker"
+          E="artifacts/GlowR-abi-evidence-docker"
+          cp "$K"/*.zip pub/ 2>/dev/null || true
+          for f in kmi_report gki_report; do
+            [ -f "$E/$f.txt" ] && cp "$E/$f.txt" "pub/$f-docker.txt" || true
           done
+          # 注意：上传产物时 out/ 的目录层级会被保留，所以用 find 兜住路径差异
+          VS="$(find "$E" -name vmlinux.symvers -print -quit || true)"
+          CF="$(find "$E" -name .config -print -quit || true)"
+          if [ -n "$VS" ]; then cp "$VS" "pub/vmlinux.symvers-docker"; fi
+          if [ -n "$CF" ]; then cp "$CF" "pub/kernel-config-docker.txt"; fi
+          KREL="$(sed -n 's/^kernelrelease=//p' "$E/build-info.txt" 2>/dev/null || true)"
+          if [ -n "${KREL:-}" ]; then printf '%s\n' "$KREL" > "pub/kernelrelease-docker.txt"; fi
           echo "=== 将上传 ==="
           ls -lh pub
 

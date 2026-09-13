@@ -6786,6 +6786,13 @@ CONFIG_OVERLAY_FS_XINO_AUTO=y
 # （原来的 CONFIG_OVERLAY_FS_USERXATTR 已删：5.10 这棵树的 Kconfig 里没有这个选项，
 #   写了也会被静默忽略，留着只会误导。）
 # mqueue 文件系统：runc 创建容器时必挂 /dev/mqueue（v1.0.5 唯一必须的内核改动）
+# 注意：POSIX_MQUEUE 是这一块里唯一会改动结构体布局的选项 —— 它给
+#   struct user_struct 加了一个 unsigned long mq_bytes，而 genksyms 会顺着
+#   cred->user / task_struct->cred 的指针成员把这个定义级联进 __crc_init_task。
+#   init_task 一漂，原厂 mi_schedule/sched_walt 就按错偏移读写 task_struct，
+#   开机 0.37s panic（GlowR-v1.0.11-noabi 首屏无限重启的根因）。
+#   已用 ANDROID_KABI_USE(1, ...) 把它挪进 user_struct 的 KABI 预留槽位抵消，
+#   见 include/linux/sched/user.h 与《死机复盘-0913-NoABI首屏重启.md》附录 A/B。
 CONFIG_POSIX_MQUEUE=y
 # ---------------------------------------------------------------------------
 # 以下三项保持关闭，不要开：
