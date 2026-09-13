@@ -137,13 +137,17 @@ jobs:
           [ "$fail" = 0 ] && echo "Docker 关键配置断言通过"
           exit $fail
 
-      - name: Build kernel Image.gz
-        run: make ARCH=arm64 O=out LLVM=1 LLVM_IAS=1 -j$(nproc) Image.gz
+      # 必须同时产出未压缩的 Image：
+      # 原厂 boot 分区里放的就是未压缩 Image（ARM64 头 text_offset=0），ABL 直接按 2MB 对齐加载；
+      # 若只塞 Image.gz，ABL 解压后的落点会偏 0x80000，内核每次启动都报
+      # "Kernel image misaligned at boot"（Kernel Offset 恒为 [2MB 对齐 + 0x80000]）。
+      - name: Build kernel Image + Image.gz
+        run: make ARCH=arm64 O=out LLVM=1 LLVM_IAS=1 -j$(nproc) Image Image.gz
 
       - name: Verify build products (vmlinux.symvers 由 link-vmlinux.sh 自动产出)
         run: |
-          ls -lh out/arch/arm64/boot/Image.gz out/vmlinux.symvers out/.config
-          file out/arch/arm64/boot/Image.gz
+          ls -lh out/arch/arm64/boot/Image out/arch/arm64/boot/Image.gz out/vmlinux.symvers out/.config
+          file out/arch/arm64/boot/Image out/arch/arm64/boot/Image.gz
           echo "符号表行数: $(wc -l < out/vmlinux.symvers)"
 
       - name: 记录构建信息（kernelrelease / 编译时间 / 提交）
@@ -165,7 +169,9 @@ jobs:
           cd AnyKernel3
           rm -f *placeholder
           rm -rf .git .github   # 干净打包
-          cp ../out/arch/arm64/boot/Image.gz .
+          # 用未压缩 Image 打包（AnyKernel3 查找顺序里 Image 优先于 Image.gz），
+          # 与原厂 boot 分区一致，避免 ABL 解压 gzip 内核导致加载地址非 2MB 对齐。
+          cp ../out/arch/arm64/boot/Image .
           # 配置 anykernel.sh：设备 marble / marblein（Redmi Note 12 Turbo / POCO F5）
           sed -i "s|kernel.string=.*|kernel.string=GlowR Kernel for Redmi Note 12 Turbo (marble) / POCO F5 (marblein)|" anykernel.sh
           sed -i "s|device.name1=.*|device.name1=marble|" anykernel.sh
