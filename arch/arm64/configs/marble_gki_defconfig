@@ -6773,8 +6773,21 @@ CONFIG_CC_HAS_SANCOV_TRACE_PC=y
 #        （详见《Android-Docker-内核改造全记录.md》）。
 #   代价：这些选项会改掉一批导出符号的 CRC -> 本分支走 NoABI 路线（module.c 放行）。
 # ============================================================================
-# 隔离 / 安全类（v1.0.2 保留的 5 项；KEYS / SECCOMP 原厂本来就是 y）
-CONFIG_CGROUP_DEVICE=y
+# 隔离 / 安全类（KEYS / SECCOMP 原厂本来就是 y）
+#
+# CONFIG_CGROUP_DEVICE —— 2026-09-13 定论：**不能开，也没法用 KABI 预留槽抵消**。
+#   开了它，include/linux/cgroup_subsys.h 会多出一个 SUBSYS(devices)，往
+#   enum cgroup_subsys_id 里插进 devices_cgrp_id，把 CGROUP_SUBSYS_COUNT 从 5
+#   顶到 6；而 struct cgroup / struct css_set / struct cgroup_subsys_state 里都有
+#   subsys[CGROUP_SUBSYS_COUNT] 这种数组 —— 数组尺寸变了就是**真实的内存
+#   布局破坏**，不是哈希漂移，没有字段可以挪进 ANDROID_KABI_USE 预留槽。
+#   它会沿着 task_struct->css_set / page->memcg 级联出去：本地用 genksyms 对
+#   663 条失配符号所在的 129 个 .c 逐个复算，docker 配置共造成
+#   2543 条 CRC 差异（含 module_layout），单独关掉本项后剩余差异 = 0。
+#   另外原厂 ROM 内核本身就是 CGROUP_DEVICE=n（stock-abi 基线 2268 条全靠这点），
+#   Android 13 又走 cgroup v2 统一层、压根没有 v1 的 devices 控制器；
+#   容器设备控制交给 eBPF（CONFIG_CGROUP_BPF=y 已开）。
+# CONFIG_CGROUP_DEVICE is not set
 CONFIG_KEYS=y
 CONFIG_SECCOMP=y
 CONFIG_USER_NS=y
