@@ -87,14 +87,30 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y bc bison flex libssl-dev libncurses-dev zip cpio
 
+      # clang toolchain 是写死版本号的固定产物，没必要每次重新下 ~1GB。
+      # 缓存 key 里带版本号：将来换 clang 版本时改 key 就自动失效重建。
+      # 注意 actions/cache 的 key 是不可变的（命中后不会更新），所以版本号必须写进来。
+      - name: 缓存 Android Clang toolchain (clang-r450784d)
+        id: clang-cache
+        uses: actions/cache@v4
+        with:
+          path: toolchain/clang
+          key: clang-r450784d-android13-release-v1
+
       - name: Download Android Clang toolchain (clang-r450784d, Android 13 / 5.10 GKI)
+        if: steps.clang-cache.outputs.cache-hit != 'true'
         run: |
           curl -fL --retry 3 -o clang.tar.gz \
             "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android13-release/clang-r450784d.tar.gz"
           mkdir -p toolchain/clang
           tar -xf clang.tar.gz -C toolchain/clang
+
+      # PATH 要通过 $GITHUB_PATH 传给后续步骤，所以必须单独一步。
+      # 顺便用绝对路径验一下缓存/解包出来的工具链是完整的（缓存损坏时能在这里炸）。
+      - name: 把 clang 加进 PATH
+        run: |
           echo "$PWD/toolchain/clang/bin" >> $GITHUB_PATH
-          clang --version | head -1
+          ./toolchain/clang/bin/clang --version | head -1
 
       - name: Configure kernel (marble_gki_defconfig = 唯一配置来源，Docker 选项已内建)
         run: |
