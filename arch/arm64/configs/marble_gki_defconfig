@@ -6771,7 +6771,9 @@ CONFIG_CC_HAS_SANCOV_TRACE_PC=y
 #   Kconfig 以"最后一次出现"为准，靠这里覆盖前面那些 "# CONFIG_xxx is not set"。
 #   依据：Docker 官方 contrib/check-config.sh + 本项目 v1.0.1~v1.0.6 的实测迭代
 #        （详见《Android-Docker-内核改造全记录.md》）。
-#   代价：这些选项会改掉一批导出符号的 CRC -> 本分支走 NoABI 路线（module.c 放行）。
+#   现状：本块其余选项（KEYS / SECCOMP / USER_NS / POSIX_MQUEUE / OVERLAY_FS_*）经
+#        genksyms 逐个复算确认不改任何导出符号的 CRC；唯一会破坏 ABI 的
+#        CGROUP_DEVICE 已关（见下）。NoABI 仍保留 module.c 放行作兜底。
 # ============================================================================
 # 隔离 / 安全类（KEYS / SECCOMP 原厂本来就是 y）
 #

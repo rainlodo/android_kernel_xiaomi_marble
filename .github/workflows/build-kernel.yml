@@ -125,13 +125,24 @@ jobs:
           grep -E '^#? ?CONFIG_(LOCALVERSION|MODVERSIONS|MODULES|LTO_CLANG|CFI_CLANG|KASAN|SHADOW_CALL_STACK|STACKPROTECTOR|TRIM_UNUSED_KSYMS|NAMESPACES|USER_NS|PID_NS|IPC_NS|SYSVIPC|POSIX_MQUEUE|CGROUP_DEVICE|CGROUP_BPF|KEYS|SECCOMP|TMPFS_XATTR|OVERLAY_FS)' out/.config || true
           # defconfig 是唯一配置来源：这里断言 Docker 必需项没有被 Kconfig 依赖静默回滚
           fail=0
-          for o in POSIX_MQUEUE USER_NS CGROUP_DEVICE CGROUP_BPF SECCOMP KEYS \
+          for o in POSIX_MQUEUE USER_NS CGROUP_BPF SECCOMP KEYS \
                    OVERLAY_FS_INDEX OVERLAY_FS_METACOPY OVERLAY_FS_XINO_AUTO \
                    NAMESPACES NET_NS UTS_NS; do
             grep -q "^CONFIG_$o=y" out/.config || { echo "::error::CONFIG_$o 未生效"; fail=1; }
           done
-          # 这三个是 v1.0.1 bootloop / v1.0.5 解锁卡死的嫌疑项，必须保持关闭
-          for o in PID_NS IPC_NS SYSVIPC TMPFS_XATTR; do
+          # 必须保持关闭的：PID_NS / IPC_NS / SYSVIPC 是 v1.0.1 bootloop 与 v1.0.5
+          # 解锁卡死的嫌疑项；TMPFS_XATTR 用不到（vfs 驱动 + host 网络）。
+          #
+          # CGROUP_DEVICE 是硬性 ABI 约束：devices 子系统会往 enum cgroup_subsys_id
+          # 里插一个 devices_cgrp_id，把 CGROUP_SUBSYS_COUNT 从 5 顶到 6；而
+          # struct cgroup / struct css_set / struct cgroup_subsys_state 里都有
+          # subsys[CGROUP_SUBSYS_COUNT] 数组 —— 数组尺寸变了就是真实的内存布局破坏，
+          # 没有字段能挪进 ANDROID_KABI_USE 预留槽。实测它会改掉 2543 条导出符号的
+          # CRC（含 module_layout，其中 663 条是 ROM vendor 模块必需的），单独关掉
+          # 本项后差异归零。原厂 ROM 内核本身就是 n，Android 13 走 cgroup v2 统一层
+          # 也没有 v1 的 devices 控制器（实测 /proc/cgroups 无 devices），容器设备
+          # 控制交给 eBPF（CONFIG_CGROUP_BPF=y 已开）。
+          for o in PID_NS IPC_NS SYSVIPC TMPFS_XATTR CGROUP_DEVICE; do
             grep -q "^# CONFIG_$o is not set" out/.config || { echo "::error::CONFIG_$o 应为关闭"; fail=1; }
           done
           [ "$fail" = 0 ] && echo "Docker 关键配置断言通过"
@@ -338,7 +349,7 @@ jobs:
             echo ""
             echo "| 文件 | 说明 |"
             echo "| --- | --- |"
-            echo "| \`GlowR-kernel-marble-docker-$VERSION.zip\` | 唯一产物：额外打开容器所需命名空间；ABI 与原厂不完全一致，靠内核放行 CRC 不匹配模块加载 ROM 的 vendor 模块 |"
+            echo "| \`GlowR-kernel-marble-docker-$VERSION.zip\` | 唯一产物：额外打开容器所需命名空间；配置已按原厂 ABI 对齐（对账结果见 \`kmi_report-docker.txt\`），内核仍保留放行 CRC 不匹配模块的能力作兜底 |"
             echo "| \`*.symvers\` / \`*.config\` / \`*report*.txt\` / \`kernelrelease-*.txt\` | ABI 对账证据（导出符号表 / 内核配置 / 校验报告 / 版本串） |"
             echo ""
             echo "> 适用机型：Redmi Note 12 Turbo / POCO F5（marble / marblein）。刷入前请自行备份 boot 分区。"
