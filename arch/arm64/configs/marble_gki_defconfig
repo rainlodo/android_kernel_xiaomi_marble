@@ -6819,3 +6819,4 @@ CONFIG_POSIX_MQUEUE=y
 #   overlayfs upper / 写 xattr 时再单开并验证。
 # ---------------------------------------------------------------------------
 # CONFIG_IPC_NS is not set
+CONFIG_SCHED_BORE=y
