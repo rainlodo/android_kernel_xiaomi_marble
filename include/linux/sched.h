@@ -514,6 +514,10 @@ struct sched_entity {
 #endif // CONFIG_SCHED_BORE
 };
 
+#ifdef CONFIG_SCHED_BORE
+void sched_fork_bore(struct task_struct *p, struct task_struct *parent);
+#endif // CONFIG_SCHED_BORE
+
 struct sched_rt_entity {
 	struct list_head		run_list;
 	unsigned long			timeout;
