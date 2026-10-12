@@ -6819,4 +6819,18 @@ CONFIG_POSIX_MQUEUE=y
 #   overlayfs upper / 写 xattr 时再单开并验证。
 # ---------------------------------------------------------------------------
 # CONFIG_IPC_NS is not set
+
+# ---------------------------------------------------------------------------
+# MGLRU / BORE（2026-10-12）
+#   CONFIG_SCHED_BORE=y          BORE 调度器（burst 惩罚），运行时可用
+#                                /proc/sys/kernel/sched_bore 开关，默认 1=开
+#   CONFIG_LRU_GEN=y             multi-gen LRU 实现
+#   CONFIG_LRU_GEN_ENABLED=y     默认启用（否则要 echo y > /sys/kernel/mm/lru_gen/enabled）
+#   CONFIG_LRU_GEN_STATS 不打开  只影响调试用的历史统计，有 per-memcg/per-node 内存开销
+# ABI：新增结构成员都藏在 __GENKSYMS__ 之外，导出符号 CRC 不变；
+#      task_struct 的新字段走 ANDROID_KABI_USE(2) 预留槽，避免布局位移。
+# ---------------------------------------------------------------------------
 CONFIG_SCHED_BORE=y
+CONFIG_LRU_GEN=y
+CONFIG_LRU_GEN_ENABLED=y
+# CONFIG_LRU_GEN_STATS is not set

@@ -130,6 +130,13 @@ union swap_header {
  */
 struct reclaim_state {
 	unsigned long reclaimed_slab;
+#ifndef __GENKSYMS__
+	// HACK: CRC ABI fixups
+#ifdef CONFIG_LRU_GEN
+	/* per-thread mm walk data */
+	struct lru_gen_mm_walk *mm_walk;
+#endif
+#endif
 };
 
 #ifdef __KERNEL__

@@ -1396,7 +1396,17 @@ struct task_struct {
 	/* PF_IO_WORKER */
 	ANDROID_KABI_USE(1, void *pf_io_worker);
 
+#ifdef CONFIG_LRU_GEN
+	/*
+	 * MGLRU 的 in_lru_fault 本来该是个 1-bit 位域，但往上面的位域里插一位
+	 * 会动到 task_struct 的布局（ROM 模块是按官方布局编译的），所以改借
+	 * KABI 预留槽：__GENKSYMS__ 下展开成 android_kabi_reserved2，CRC 与
+	 * 结构体尺寸都不变。
+	 */
+	ANDROID_KABI_USE(2, unsigned int in_lru_fault);
+#else
 	ANDROID_KABI_RESERVE(2);
+#endif
 	ANDROID_KABI_RESERVE(3);
 	ANDROID_KABI_RESERVE(4);
 	ANDROID_KABI_RESERVE(5);

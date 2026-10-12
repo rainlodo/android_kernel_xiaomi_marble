@@ -120,16 +120,24 @@ jobs:
       - name: 注入 GlowR 版本串（版本号 + 编译时间）
         run: scripts/glowr-version.sh out "${{ needs.prepare.outputs.version }}" "${{ needs.prepare.outputs.stamp }}"
 
-      - name: 检查本次生效的关键配置（Docker 必需项断言）
+      - name: 检查本次生效的关键配置（Docker / MGLRU / BORE 必需项断言）
         run: |
-          grep -E '^#? ?CONFIG_(LOCALVERSION|MODVERSIONS|MODULES|LTO_CLANG|CFI_CLANG|KASAN|SHADOW_CALL_STACK|STACKPROTECTOR|TRIM_UNUSED_KSYMS|NAMESPACES|USER_NS|PID_NS|IPC_NS|SYSVIPC|POSIX_MQUEUE|CGROUP_DEVICE|CGROUP_BPF|KEYS|SECCOMP|TMPFS_XATTR|OVERLAY_FS)' out/.config || true
+          grep -E '^#? ?CONFIG_(LOCALVERSION|MODVERSIONS|MODULES|LTO_CLANG|CFI_CLANG|KASAN|SHADOW_CALL_STACK|STACKPROTECTOR|TRIM_UNUSED_KSYMS|NAMESPACES|USER_NS|PID_NS|IPC_NS|SYSVIPC|POSIX_MQUEUE|CGROUP_DEVICE|CGROUP_BPF|KEYS|SECCOMP|TMPFS_XATTR|OVERLAY_FS|LRU_GEN|SCHED_BORE)' out/.config || true
           # defconfig 是唯一配置来源：这里断言 Docker 必需项没有被 Kconfig 依赖静默回滚
           fail=0
           for o in POSIX_MQUEUE USER_NS CGROUP_BPF SECCOMP KEYS \
                    OVERLAY_FS_INDEX OVERLAY_FS_METACOPY OVERLAY_FS_XINO_AUTO \
-                   NAMESPACES NET_NS UTS_NS; do
+                   NAMESPACES NET_NS UTS_NS \
+                   LRU_GEN LRU_GEN_ENABLED SCHED_BORE; do
             grep -q "^CONFIG_$o=y" out/.config || { echo "::error::CONFIG_$o 未生效"; fail=1; }
           done
+          # MGLRU 的调试统计有 per-memcg/per-node 内存开销，默认必须是关的
+          grep -q "^# CONFIG_LRU_GEN_STATS is not set" out/.config \
+            || { echo "::error::CONFIG_LRU_GEN_STATS 应为关闭"; fail=1; }
+          # MGLRU 要往 page->flags 里塞 LRU_GEN_WIDTH + LRU_REFS_WIDTH 位；
+          # 放不下的话 page-flags-layout.h 会直接 #error（编译期就拦住了），
+          # 这里只是把实际宽度打出来留证据。
+          grep -E "#define (LRU_GEN_WIDTH|__LRU_REFS_WIDTH)" out/include/generated/bounds.h || true
           # 必须保持关闭的：PID_NS / IPC_NS / SYSVIPC 是 v1.0.1 bootloop 与 v1.0.5
           # 解锁卡死的嫌疑项；TMPFS_XATTR 用不到（vfs 驱动 + host 网络）。
           #
