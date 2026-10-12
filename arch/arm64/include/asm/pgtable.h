@@ -1010,6 +1010,13 @@ static inline bool arch_faults_on_old_pte(void)
 #define arch_faults_on_old_pte		arch_faults_on_old_pte
 
 /*
+ * MGLRU 用到的新名字。ACK 在 5.11 前后把 arch_faults_on_old_pte() 改名成
+ * arch_has_hw_pte_young()（语义相反），本树仍在用旧名字（mm/memory.c 依赖它），
+ * 所以这里只补一个新别名，不动旧的那个。
+ */
+#define arch_has_hw_pte_young		cpu_has_hw_af
+
+/*
  * Experimentally, it's cheap to set the access flag in hardware and we
  * benefit from prefaulting mappings as 'old' to start with.
  */
