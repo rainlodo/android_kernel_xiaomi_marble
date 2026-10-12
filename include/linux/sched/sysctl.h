@@ -92,6 +92,12 @@ int sysctl_numa_balancing(struct ctl_table *table, int write, void *buffer,
 int sysctl_schedstats(struct ctl_table *table, int write, void *buffer,
 		size_t *lenp, loff_t *ppos);
 
+#ifdef CONFIG_SCHED_BORE
+extern u8 sched_bore;
+int sched_bore_update_handler(struct ctl_table *table, int write,
+		void *buffer, size_t *lenp, loff_t *ppos);
+#endif // CONFIG_SCHED_BORE
+
 #ifdef CONFIG_SMP
 extern unsigned int sysctl_sched_pelt_multiplier;
 
