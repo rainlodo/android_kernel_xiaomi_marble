@@ -52,7 +52,18 @@
 #include <linux/dax.h>
 #include <linux/psi.h>
 #include <linux/pagewalk.h>
+#ifndef __GENKSYMS__
+/*
+ * HACK: CRC ABI fixups
+ * shmem_fs.h -> fs_parser.h -> fs_context.h 会让 genksyms 看到
+ * struct fs_context 的完整定义，从而使 vmscan.c 中凡能走到该类型的导出符号
+ * CRC 全部变化（register_shrinker / unregister_shrinker / shrink_slab /
+ * try_to_free_mem_cgroup_pages / check_move_unevictable_pages）。
+ * 原厂内核的 vmscan.c 不含这个 include，故此处对 genksyms 隐藏它。
+ * 真实编译不受影响（__GENKSYMS__ 只在计算 CRC 的那次预处理中定义）。
+ */
 #include <linux/shmem_fs.h>
+#endif
 #include <linux/ctype.h>
 #include <linux/debugfs.h>
 
