@@ -1711,6 +1711,13 @@ static __always_inline void update_lru_sizes(struct lruvec *lruvec,
 		if (!nr_zone_taken[zid])
 			continue;
 
+		if (lru_gen_enabled() && mem_cgroup_get_zone_lru_size(lruvec, lru,
+				zid) < nr_zone_taken[zid])
+			pr_err_ratelimited("lrugen-diag: isolate lru=%d zone=%d nr=%lu size=%lu lruvec=%px task=%s:%d\n",
+				lru, zid, nr_zone_taken[zid],
+				mem_cgroup_get_zone_lru_size(lruvec, lru, zid),
+				lruvec, current->comm, current->pid);
+
 		update_lru_size(lruvec, lru, zid, -nr_zone_taken[zid]);
 	}
 

@@ -294,6 +294,15 @@ static __always_inline void del_page_from_lru_list(struct page *page,
 	if (lru_gen_del_page(lruvec, page, false))
 		return;
 
+	if (lru_gen_enabled() && mem_cgroup_get_zone_lru_size(lruvec, lru,
+			page_zonenum(page)) < thp_nr_pages(page))
+		pr_err_ratelimited("lrugen-diag: del lru=%d zone=%d nr=%d size=%lu lruvec=%px memcg=%px page=%px flags=%lx gen=%d lru=%d active=%d unevictable=%d task=%s:%d\n",
+			lru, page_zonenum(page), thp_nr_pages(page),
+			mem_cgroup_get_zone_lru_size(lruvec, lru, page_zonenum(page)),
+			lruvec, page_memcg(page), page, page->flags,
+			page_lru_gen(page), PageLRU(page), PageActive(page),
+			PageUnevictable(page), current->comm, current->pid);
+
 	list_del(&page->lru);
 	update_lru_size(lruvec, lru, page_zonenum(page), -thp_nr_pages(page));
 }
