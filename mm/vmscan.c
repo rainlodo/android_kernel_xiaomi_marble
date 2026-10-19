@@ -4127,13 +4127,12 @@ void lru_gen_look_around(struct page_vma_mapped_walk *pvmw)
 	if (suitable_to_scan(i, young))
 		update_bloom_filter(lruvec, max_seq, pvmw->pmd);
 
-	if (!walk && bitmap_weight(bitmap, MIN_LRU_BATCH) < PAGEVEC_SIZE) {
-		for_each_set_bit(i, bitmap, MIN_LRU_BATCH) {
-			page = pte_page(pte[i]);
-			activate_page(page);
-		}
-		return;
-	}
+	/*
+	 * Promote the young neighbours through the MGLRU path only.
+	 * Handing them to activate_page() would run traditional LRU
+	 * accounting for pages that MGLRU never added to
+	 * memcg->lru_zone_size, which drives that counter negative.
+	 */
 
 	/* page_update_gen() requires stable page_memcg() */
 	if (!mem_cgroup_trylock_pages(memcg))
