@@ -4256,7 +4256,20 @@ static bool isolate_page(struct lruvec *lruvec, struct page *page, struct scan_c
 	if (!get_page_unless_zero(page))
 		return false;
 
-	ClearPageLRU(page);
+	/*
+	 * Raced with a per-CPU pagevec that has already claimed this page.
+	 * pagevec_lru_move_fn() clears PG_lru before taking lru_lock; if we
+	 * clear it unconditionally here we can unlink the page from its MGLRU
+	 * list while the pagevec still owns a reference and will later run
+	 * del_page_from_lru_list()/add_page_to_lru_list() on it.  That ends up
+	 * doing list_del()/list_add() on an already detached page->lru and
+	 * triggers list corruption.  Match upstream isolate_folio(), which
+	 * uses folio_test_clear_lru() and bails out if the page was claimed.
+	 */
+	if (!TestClearPageLRU(page)) {
+		put_page(page);
+		return false;
+	}
 
 	/* see the comment on MAX_NR_TIERS */
 	if (!PageReferenced(page))
